@@ -65,17 +65,18 @@ class Predictor:
         folds: for xval
         subset: percent of training data to use during xval or model fitting
         """
-        self.mode = 'pred'
+        self.mode = 'kmnn'
 
-        self.models = [{'path': 'data/model1_train.csv', 'resolution':[192,288], 'y':1},
-                        {'path': 'data/model2_train.csv', 'resolution':[128,256], 'y':2},
-                        {'path': 'data/model3_train.csv', 'resolution':[160,320], 'y':3}]
+        self.models = [{'path': 'data/model1_train.csv', 'resolution':[192,288], 'y':0},
+                        {'path': 'data/model2_train.csv', 'resolution':[128,256], 'y':1},
+                        {'path': 'data/model3_train.csv', 'resolution':[160,320], 'y':2}]
         self.test_data = {'path': 'data/model_test.csv', 'resolution':[72,144], 'y':[]}
         self.nb_classes = len(self.models)
 
-        self.nb_epoch = 16
+        self.nb_epoch = 20
         self.batch_size = 128
-        self.subset = 1
+        self.subset = .1
+        self.columns = 1274
 
         self.folds = 5
 
@@ -91,29 +92,33 @@ class Predictor:
         and y made categorical.
         """
         self.observations = [model['resolution'][0]*model['resolution'][1]*4 for model in self.models]
-        self.X = np.empty([sum(self.observations), 1275])
+
+        # add a column for y values to shuffle
+        self.X = np.empty([sum(self.observations), self.columns+1])
 
         idx = 0
         for m in range(len(self.models)):
             print('Loading model', m+1, '...')
             # print(self.models[m])
 
-            self.X[idx:idx+self.observations[m], :1274] = pd.read_csv(self.models[m]['path'], delimiter=',', header=0, dtype='float32').values[:,1:]
-            self.X[idx:idx+self.observations[m], 1274] = self.models[m]['y']
+            self.X[idx:idx+self.observations[m], :self.columns] = pd.read_csv(self.models[m]['path'], delimiter=',', header=0, dtype='float32').values[:,1:self.columns+1]
+            self.X[idx:idx+self.observations[m], self.columns] = self.models[m]['y']
             idx += self.observations[m]
+
+        print('Normalizing data... jk')
 
         print('Shuffling data order...')
         np.random.shuffle(self.X)
 
         if self.subset != 1:
             #     np.random.shuffle(model['X'])
-            self.X = self.X[0:int(self.subset*data.shape[0]):, ::]
+            self.X = self.X[0:int(self.subset*self.X.shape[0]):, ::]
 
             # model['X'] = model['X'].reshape(model['X'].shape[0], 1, model['resolution'][0], model['resolution'][1])
             # to do : normalize
 
-        self.y = self.X[:,[1274]]
-        self.X = self.X[:, :1274]
+        self.y = self.X[:,[self.columns]]
+        self.X = self.X[:, :self.columns]
         print(self.y.shape, self.y)
         self.y = np_utils.to_categorical(self.y, self.nb_classes)
 
@@ -134,55 +139,24 @@ class Predictor:
 
         model = Sequential()
 
-        model.add(Dense(1274, 1274))
+        model.add(Dense(self.columns, self.columns))
         model.add(Activation('relu'))
         # model.add(Dropout(0.5))
 
-        # model.add(Dense(1274, 512))
-        # model.add(Activation('relu'))
+        model.add(Dense(self.columns, self.columns))
+        model.add(Activation('relu'))
+        model.add(Dropout(0.5))
+
+        model.add(Dense(self.columns, self.columns))
+        model.add(Activation('relu'))
         # model.add(Dropout(0.5))
 
-        model.add(Dense(1274, self.nb_classes))
+        model.add(Dense(self.columns, self.nb_classes))
         model.add(Activation('softmax'))
 
         model.compile(loss='categorical_crossentropy', optimizer='adadelta')
 
         self.model = model
-
-    # def fit_model(self, X, y):
-    #     """
-    #     fits a model to some data
-    #     """
-
-    #     for e in range(self.nb_epoch):
-    #         print('Epoch: ', e, ' of ', self.nb_epoch)
-    #         progbar = Progbar(target=X.shape[0], verbose=True)
-
-    #         # batch train with realtime data augmentation
-    #         total_accuracy = 0
-    #         total_loss = 0
-    #         current = 0
-
-    #         for X_batch, y_batch in self.datagen.flow(X, y, self.batch_size):
-
-    #             # prepare the batch with random augmentations
-    #             X_batch, y_batch = self.batch_warp(X_batch, y_batch)
-
-    #             # train on the batch
-    #             loss, accuracy = self.model.train(X_batch, y_batch, accuracy = True)
-                
-    #             # update the progress bar
-    #             total_loss += loss * self.batch_size
-    #             total_accuracy += accuracy * self.batch_size
-    #             current += self.batch_size
-    #             if current > self.X.shape[0]:
-    #                 current = self.X.shape[0]
-    #             else:
-    #                 progbar.update(current, [('loss', loss), ('acc.', accuracy)])
-    #         progbar.update(current, [('loss', total_loss/current), ('acc.', total_accuracy/current)])
-            
-    #         # checkpoints between epochs
-    #         self.model.save_weights(self.save_weights_file, overwrite = True)
 
     def cross_validate(self):
         """
@@ -209,6 +183,45 @@ class Predictor:
         
         scores = np.array(scores)
         print("Accuracy: " + str(scores.mean()) + " (+/- " + str(scores.std()/2) + ")")
+
+    def kmeans(self):
+        """
+        provides a simple cross validation measurement. It doen't make a new
+        model for each fold though, so it isn't actually cross validation... the
+        model just gets better with time for now. This is pretty expensive to run.
+        """
+
+        kf = KFold(self.X.shape[0], self.folds)
+        scores = []
+
+        for train, test in kf:
+            X_train, X_test, y_train, y_test = self.X[train], self.X[test], self.y[train], self.y[test]
+
+            correct = 0.0
+            total = 0.0
+
+            for i in range(X_test.shape[0]):
+                total += 1
+                best_class = self.find_best_class(X_test[i], X_train)
+                if best_class == y_test[i]:
+                    correct += 1
+                print('Seen:',total, 'Current Accuracy:', correct / total)
+            
+            score = correct / X_test.shape[0]
+            print ('Score: ' + str(score))
+            scores.append(score)
+        
+        scores = np.array(scores)
+        print("Accuracy: " + str(scores.mean()) + " (+/- " + str(scores.std()/2) + ")")
+
+    def find_best_class(current, neighbors):
+        best_class, best_dist = 0, 3.4028235e+38
+        for n in range(X_train.shape[0]):
+            if abs(X_train[n][0] - X_test[i][0]) < 2 and abs(X_train[n][1]- X_test[i][1]) < 2:
+                dist = np.linalg.norm(X_train[n] - X_test[i])
+                if dist < best_dist:
+                    best_dist = dist
+                    best_class = y_train[n]
 
     def get_predictions(self):
         """
@@ -254,13 +267,17 @@ class Predictor:
             print('loading data...')
             self.load_data()
         
-        print('building model...')
-        if self.mode != 'xval':
+        if self.mode != 'xval' and self.mode != 'kmnn':
+            print('building model...')
             self.build_keras()
 
         if self.mode == 'xval':
             print('evaluating model...')
             self.cross_validate()
+
+        if self.mode == 'kmnn':
+            print('performing k-means nn')
+            self.kmeans()
 
         if self.mode == 'pred':
             print('training model...')
