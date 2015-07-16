@@ -75,7 +75,7 @@ class Predictor:
 
         self.nb_epoch = 20
         self.batch_size = 128
-        self.subset = .1
+        self.subset = 1
         self.columns = 1274
 
         self.folds = 5
@@ -184,7 +184,7 @@ class Predictor:
         scores = np.array(scores)
         print("Accuracy: " + str(scores.mean()) + " (+/- " + str(scores.std()/2) + ")")
 
-    def kmeans(self):
+    def kmeans_xval(self):
         """
         provides a simple cross validation measurement. It doen't make a new
         model for each fold though, so it isn't actually cross validation... the
@@ -202,10 +202,11 @@ class Predictor:
 
             for i in range(X_test.shape[0]):
                 total += 1
-                best_class = self.find_best_class(X_test[i], X_train)
-                if best_class == y_test[i]:
+                best_class = self.find_best_class(X_test[i], X_train, y_train)
+
+                if (best_class == y_test[i]).all():
                     correct += 1
-                print('Seen:',total, 'Current Accuracy:', correct / total)
+                print('Seen:',total, 'Correct:', correct, 'Accuracy:', correct/total)
             
             score = correct / X_test.shape[0]
             print ('Score: ' + str(score))
@@ -214,14 +215,43 @@ class Predictor:
         scores = np.array(scores)
         print("Accuracy: " + str(scores.mean()) + " (+/- " + str(scores.std()/2) + ")")
 
-    def find_best_class(current, neighbors):
+    def kmeans(self):
+        """
+        provides a simple cross validation measurement. It doen't make a new
+        model for each fold though, so it isn't actually cross validation... the
+        model just gets better with time for now. This is pretty expensive to run.
+        """
+
+        predictions = []
+        X_test = pd.read_csv(self.test_file, delimiter=',', skiprows=1, dtype='float32')
+
+        X_train, y_train = self.X[train], self.y[train]
+
+
+        for i in range(X_test.shape[0]):
+
+            best_class = self.find_best_class(X_test[i], X_train, y_train)
+
+            
+            print('Seen:', i)
+        
+        score = correct / X_test.shape[0]
+        print ('Score: ' + str(score))
+        scores.append(score)
+        
+        scores = np.array(scores)
+
+
+    def find_best_class(self, current, X_train, y_train):
         best_class, best_dist = 0, 3.4028235e+38
         for n in range(X_train.shape[0]):
-            if abs(X_train[n][0] - X_test[i][0]) < 2 and abs(X_train[n][1]- X_test[i][1]) < 2:
-                dist = np.linalg.norm(X_train[n] - X_test[i])
+            if abs(X_train[n][0] - current[0]) < 2 and abs(X_train[n][1]- current[1]) < 2:
+                dist = np.linalg.norm(X_train[n] - current)
                 if dist < best_dist:
                     best_dist = dist
                     best_class = y_train[n]
+        # return np.argmax(best_class) - 1
+        return best_class
 
     def get_predictions(self):
         """
