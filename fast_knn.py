@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import csv as csv
 from scipy import spatial
+from scipy import stats
 
 
 from sklearn.cross_validation import KFold
@@ -50,7 +51,7 @@ class Predictor:
 
         self.folds = 5
 
-        self.out_file = 'solutions/answersknn.csv'
+        self.out_file = 'solutions/answersknnv.csv'
 
     def load_data(self):
         """ 
@@ -91,41 +92,43 @@ class Predictor:
         print('Building tree...')
         kdtree = spatial.cKDTree(self.X[:,0:2], leafsize=10)
 
-        print(self.X[:, 0:2])
-
-        print('Beginning prediction...')
+        print('Developing prediction...')
         for i in range(X_test.shape[0]):
 
-            best_class, next_best_class = 0, 0
-            best_dist, next_best_dist = 3.4028235e+38, 3.4028235e+38
-            best_idx, next_best_idx = 0
-
-            # find points within +- 2 degrees lat long
-            neighbors = kdtree.query_ball_point(X_test[i,0:2], 2)
+            # find points within +- x degrees lat long of test point
+            neighbors = kdtree.query_ball_point(X_test[i,0:2], 4)
+            neighbor_data = np.empty([len(neighbors), 3])
+            neighbor_data[:,0] = neighbors
             
-            # find closest neighbor among these
-            for n in neighbors:
+            # Identify stats about these points
+            for neighbor in neighbor_data:
+                # find climate dist difference and class of neighbor
+                neighbor[1] = np.linalg.norm(X_test[i,2:] - self.X[neighbor[0],2:])
+                neighbor[2] = self.y[neighbor[0]]
 
-                # find climate dist difference
-                dist = np.linalg.norm(X_test[i][2:] - self.X[n][2:])
+            # sort the data by dist
+            neighbor_data = neighbor_data[neighbor_data[:,1].argsort()]
 
-                if dist < best_dist:
-                    next_best_dist = best_dist
-                    best_dist = dist
-                    next_best_class = best_class
-                    best_class = self.y[n]
-                    next_best_idx = best_idx
-                    best_idx = n
-                elif dist < next_best_dist:
-                    next_best_dist = dist
-                    next_best_class = self.y[n]
-                    next_best_idx = n
+            topn = 5
+            decided = False
+            while not decided:
+                classes, counts = stats.mode(neighbor_data[:3,2])
+                if counts[0] > topn/2:
+                    predictions[i] = classes[0]
+                    decided = True
 
-            predictions[i] = best_class
-
-            print('ID:', i, 'Pred:', predictions[i], 'Dist:', best_dist, '2nd Pred:', next_best_class, '2nd dist:', next_best_dist)
-            print('Test Obs:', X_test[i])
-            print('Nearest Neighbor:', self.X[best_idx])
+                    if counts[0] != topn:
+                        print('Vote resolved at:', i, 'with outcome:', predictions[i], 'and votes:')
+                        for x in range(topn):
+                            print('Class:', neighbor_data[x,2], 'Dist:', neighbor_data[x,1])
+                else:
+                    print('Disputed point with', topn, 'votes:', i)
+                    # print('Point:', X_test[i])
+                    for x in range(topn):
+                        print('Class:', neighbor_data[x,2], 'Dist:', neighbor_data[x,1])
+                        # print('Point:', self.X[neighbor_data[x,0]])
+                    topn+=2
+        print(np.bincount(predictions))
 
         return predictions
 
