@@ -9,6 +9,8 @@ from __future__ import print_function
 import numpy as np
 import pandas as pd
 import csv as csv
+from scipy import spatial
+
 
 from sklearn.cross_validation import KFold
 from sklearn.cross_validation import train_test_split
@@ -18,39 +20,27 @@ import math as math
 
 class Predictor:
     """
-    predicts classes from mnist images
-    configure params in the __init__ section
-    call run once instantiated and parameterized correctly.
-    model architecture is established in build_keras()
-    preprocessing params are not yet in the __init__ list, but
-    will slowly be added.
-
-    'issues':
-    xval mode doesn't make new models each fold
-    random displacement is too expensive still
-    batch iterators are a bit of a mess if you look too closely
+    Classifies model observations based on nearest neighbor search
     """
 
     def __init__(self):
         """
         sets the parameters for the Predictor:
         mode:
-            pred - trains on full train, tests on full test, writes out predictions
-            xval - cross validation of model (see issues) and is very expensive
-            resu - resume training if interrupted by loading a checkpoint model, writes predictions after
-            load - load checkpoint model and write predictions
+            kmxv - xval
+            kmnn - predict and save predictions
         folds: for xval
         subset: percent of training data to use during xval or model fitting
         """
         self.mode = 'kmnn'
 
-        self.models = [{'path': 'data/model1_train.csv', 'resolution':[192,288], 'y':0},
-                        {'path': 'data/model2_train.csv', 'resolution':[128,256], 'y':1},
-                        {'path': 'data/model3_train.csv', 'resolution':[160,320], 'y':2}]
+        self.models = [{'path': 'data/model1_train.csv', 'resolution':[192,288], 'y':1},
+                        {'path': 'data/model2_train.csv', 'resolution':[128,256], 'y':2},
+                        {'path': 'data/model3_train.csv', 'resolution':[160,320], 'y':3}]
 
-        # self.models = [{'path': 'small_data/model1_train.csv', 'resolution':[99,1], 'y':0},
-        #                 {'path': 'small_data/model2_train.csv', 'resolution':[99,1], 'y':1},
-        #                 {'path': 'small_data/model3_train.csv', 'resolution':[99,1], 'y':2}]
+        # self.models = [{'path': 'small_data/model1_train.csv', 'resolution':[99,1], 'y':1},
+        #                 {'path': 'small_data/model2_train.csv', 'resolution':[99,1], 'y':2},
+        #                 {'path': 'small_data/model3_train.csv', 'resolution':[99,1], 'y':3}]
 
         self.test_data = {'path': 'data/model_test.csv', 'resolution':[72,144], 'y':[]}
         self.nb_classes = len(self.models)
@@ -64,8 +54,7 @@ class Predictor:
 
     def load_data(self):
         """ 
-        returns X and y - data and target - as numpy arrays, X normalized
-        and y made categorical.
+        returns X and y - data and target - as numpy arrays, y made categorical.
         """
         self.observations = [model['resolution'][0]*model['resolution'][1]*4 for model in self.models]
 
@@ -80,74 +69,69 @@ class Predictor:
             self.X[idx:idx+self.observations[m], self.columns] = self.models[m]['y']
             idx += self.observations[m]
 
-        print('Shuffling data order...')
-        np.random.shuffle(self.X)
+        # print('Shuffling data order...')
+        # np.random.shuffle(self.X)
 
         if self.subset != 1:
             np.random.shuffle(model['X'])
             self.X = self.X[0:int(self.subset*self.X.shape[0]):, ::]
 
-            # to do : normalize?
-
         self.y = self.X[:,[self.columns]]
         self.X = self.X[:, :self.columns]
 
-        self.y = np_utils.to_categorical(self.y, self.nb_classes)
-
-
-
-   
-
-    def kmeans_xval(self):
-        """
-        provides a simple cross validation measurement. It doen't make a new
-        model for each fold though, so it isn't actually cross validation... the
-        model just gets better with time for now. This is pretty expensive to run.
-        """
-
     def kmeans(self):
         """
-        provides a simple cross validation measurement. It doen't make a new
-        model for each fold though, so it isn't actually cross validation... the
-        model just gets better with time for now. This is pretty expensive to run.
+        runs scipy kmeans
         """
 
-        X_test = pd.read_csv(self.test_data['path'], delimiter=',', skiprows=1, dtype='float32').values[:,1:self.columns+1]
+        print('Loading test data...')
+        X_test = pd.read_csv(self.test_data['path'], delimiter=',', header=0, dtype='float32').values[:,1:self.columns+1]
         predictions = np.empty([X_test.shape[0]], dtype = 'int32')
 
+        print('Building tree...')
         kdtree = spatial.cKDTree(self.X[:,0:2], leafsize=10)
 
+        print(self.X[:, 0:2])
+
+        print('Beginning prediction...')
         for i in range(X_test.shape[0]):
 
-            best_class, next_best_class, best_dist, next_best_dist, best_idx = [0,0,0], [0,0,0], 3.4028235e+38, 3.4028235e+38, 0
+            best_class, next_best_class = 0, 0
+            best_dist, next_best_dist = 3.4028235e+38, 3.4028235e+38
+            best_idx, next_best_idx = 0
 
             # find points within +- 2 degrees lat long
-            neighbors = kdtree.query_ball_point(X_test[i][0:2], 2)
+            neighbors = kdtree.query_ball_point(X_test[i,0:2], 2)
             
             # find closest neighbor among these
-            for n in range(len(neighbors)):
+            for n in neighbors:
+
+                # find climate dist difference
                 dist = np.linalg.norm(X_test[i][2:] - self.X[n][2:])
+
                 if dist < best_dist:
                     next_best_dist = best_dist
                     best_dist = dist
                     next_best_class = best_class
                     best_class = self.y[n]
+                    next_best_idx = best_idx
                     best_idx = n
+                elif dist < next_best_dist:
+                    next_best_dist = dist
+                    next_best_class = self.y[n]
+                    next_best_idx = n
 
-            predictions[i] = np.argmax(best_class) + 1
+            predictions[i] = best_class
 
-            print('ID:', i, 'Pred:', predictions[i], 'Dist:', best_dist, '2nd Pred:', np.argmax(next_best_class)+1, '2nd dist:', next_best_dist)
-            print('Test Obs:', X_test[i], 'Nearest Neighbor:', self.X[best_idx])
+            print('ID:', i, 'Pred:', predictions[i], 'Dist:', best_dist, '2nd Pred:', next_best_class, '2nd dist:', next_best_dist)
+            print('Test Obs:', X_test[i])
+            print('Nearest Neighbor:', self.X[best_idx])
 
         return predictions
-
-    
 
     def save_predictions(self, predictions):
         """
         saves the predictions to file in a format that kaggle likes.
-        :param predictions: A single dimensional list of classifications
-        :p
         """
 
         predictions_file = open(self.out_file, "wb")
@@ -157,22 +141,16 @@ class Predictor:
             open_file_object.writerow([i+1, predictions[i]])
         predictions_file.close()
 
-    
     def run(self):
         """
         set up the test here!
         """
 
-
         print('Loading data...')
         self.load_data()
 
-        if self.mode == 'kmxv':
-            print('Performing k-means xval')
-            self.kmeans_xval()
-
         if self.mode == 'kmnn':
-            print('Performing k-means nearest neighbor search')
+            print('Beginning evaluation...')
             self.save_predictions(self.kmeans())
 
 def main():
