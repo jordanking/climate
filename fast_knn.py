@@ -115,7 +115,7 @@ class Predictor:
         X_test = pd.read_csv(self.test_data['path'], delimiter=',', header=0, dtype='float32').values[:,1:self.columns+1]
 
         print('Normalizing test data...')
-        X_test = (X_test - self.mean_min) / (self.mean_max - self.mean_min)
+        X_test[:,2:] = (X_test[:,2:] - self.mean_min) / (self.mean_max - self.mean_min)
 
         predictions = np.empty([X_test.shape[0]], dtype = 'int32')
 
