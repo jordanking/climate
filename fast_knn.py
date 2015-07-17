@@ -48,6 +48,7 @@ class Predictor:
 
         self.subset = 1
         self.columns = 1274
+        self.topn = 5
 
         self.folds = 5
 
@@ -70,8 +71,10 @@ class Predictor:
             self.X[idx:idx+self.observations[m], self.columns] = self.models[m]['y']
             idx += self.observations[m]
 
-        # print('Shuffling data order...')
-        # np.random.shuffle(self.X)
+        print('Finding mean observations...')
+        for i in range(self.X.shape[0]):
+            self.X[i,:] = np.mean(self.X[i*4:i+4:], axis=0)
+        self.X = self.X[0:self.X.shape[0]/4,:]
 
         if self.subset != 1:
             np.random.shuffle(model['X'])
@@ -92,7 +95,7 @@ class Predictor:
         print('Building tree...')
         kdtree = spatial.cKDTree(self.X[:,0:2], leafsize=10)
 
-        print('Developing prediction...')
+        print('Developing predictions...')
         for i in range(X_test.shape[0]):
 
             # find points within +- x degrees lat long of test point
@@ -109,25 +112,30 @@ class Predictor:
             # sort the data by dist
             neighbor_data = neighbor_data[neighbor_data[:,1].argsort()]
 
-            topn = 5
-            decided = False
-            while not decided:
-                classes, counts = stats.mode(neighbor_data[:3,2])
-                if counts[0] > topn/2:
-                    predictions[i] = classes[0]
-                    decided = True
+            topx = self.topn
+            while True:
+                if neighbor_data[0,2] == neighbor_data[1,2] or neighbor_data[0,1] * 2 < neighbor_data[1,1]:
+                    predictions[i] = neighbor_data[0,2]
+                    print('No vote at:', i, 'with outcome:', predictions[i], 'and dist:', neighbor_data[0,1])
+                    break
 
-                    if counts[0] != topn:
+                classes, counts = stats.mode(neighbor_data[:topx,2])
+                if counts[0] > (topx/3)+1:
+                    predictions[i] = classes[0]
+
+                    if not counts[0] >= topx:
                         print('Vote resolved at:', i, 'with outcome:', predictions[i], 'and votes:')
-                        for x in range(topn):
+                        for x in range(topx):
                             print('Class:', neighbor_data[x,2], 'Dist:', neighbor_data[x,1])
+                    break
+
                 else:
-                    print('Disputed point with', topn, 'votes:', i)
+                    print('Disputed point with', topx, 'votes:', i)
                     # print('Point:', X_test[i])
-                    for x in range(topn):
+                    for x in range(topx):
                         print('Class:', neighbor_data[x,2], 'Dist:', neighbor_data[x,1])
                         # print('Point:', self.X[neighbor_data[x,0]])
-                    topn+=2
+                    topx+=2
         print(np.bincount(predictions))
 
         return predictions
