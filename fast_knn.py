@@ -52,7 +52,7 @@ class Predictor:
 
         self.folds = 5
 
-        self.out_file = 'solutions/answersknnv.csv'
+        self.out_file = 'solutions/answersknnn.csv'
 
     def load_data(self):
         """ 
@@ -72,8 +72,15 @@ class Predictor:
             idx += self.observations[m]
 
         print('Finding mean observations...')
-        for i in range(self.X.shape[0]):
-            self.X[i,:] = np.mean(self.X[i*4:i+4:], axis=0)
+        for i in range(self.X.shape[0]/4):
+            self.X[i,:] = np.average(self.X[i*4:(i*4)+4,:], axis=0)
+            for l in range(2):
+                correction = self.X[i,l] % 2.5
+                if correction < 2.5/2:
+                    correction = -1 * correction
+                else:
+                    correction = 2.5 - correction
+                self.X[i,l] = self.X[i,l] + correction
         self.X = self.X[0:self.X.shape[0]/4,:]
 
         if self.subset != 1:
@@ -83,6 +90,22 @@ class Predictor:
         self.y = self.X[:,[self.columns]]
         self.X = self.X[:, :self.columns]
 
+        print('Normalizing models...')
+        self.observations = np.array(self.observations) / 4
+        idx = 0
+        self.mean_min = 0
+        self.mean_max = 0
+        for m in range(len(self.models)):
+            model_min = np.amin(self.X[idx:idx+self.observations[m], 2:])
+            model_max = np.amax(self.X[idx:idx+self.observations[m], 2:])
+            self.mean_min += model_min
+            self.mean_max += model_max
+            self.X[idx:idx+self.observations[m], :] =  (self.X[idx:idx+self.observations[m], :] - model_min) / (model_max - model_min)
+            idx += self.observations[m]
+        self.mean_min /= 3
+        self.mean_max /= 3
+
+
     def kmeans(self):
         """
         runs scipy kmeans
@@ -90,6 +113,10 @@ class Predictor:
 
         print('Loading test data...')
         X_test = pd.read_csv(self.test_data['path'], delimiter=',', header=0, dtype='float32').values[:,1:self.columns+1]
+
+        print('Normalizing test data...')
+        X_test = (X_test - self.mean_min) / (self.mean_max - self.mean_min)
+
         predictions = np.empty([X_test.shape[0]], dtype = 'int32')
 
         print('Building tree...')
@@ -112,30 +139,33 @@ class Predictor:
             # sort the data by dist
             neighbor_data = neighbor_data[neighbor_data[:,1].argsort()]
 
-            topx = self.topn
-            while True:
-                if neighbor_data[0,2] == neighbor_data[1,2] or neighbor_data[0,1] * 2 < neighbor_data[1,1]:
-                    predictions[i] = neighbor_data[0,2]
-                    print('No vote at:', i, 'with outcome:', predictions[i], 'and dist:', neighbor_data[0,1])
-                    break
+            predictions[i] = neighbor_data[0,2]
+            print('ID:', i, 'class:', predictions[i], 'dist:', neighbor_data[0,1])
 
-                classes, counts = stats.mode(neighbor_data[:topx,2])
-                if counts[0] > (topx/3)+1:
-                    predictions[i] = classes[0]
+            # topx = self.topn
+            # while True:
+            #     if neighbor_data[0,2] == neighbor_data[1,2] or neighbor_data[0,1] * 2 < neighbor_data[1,1]:
+            #         predictions[i] = neighbor_data[0,2]
+            #         print('No vote at:', i, 'with outcome:', predictions[i], 'and dist:', neighbor_data[0,1])
+            #         break
 
-                    if not counts[0] >= topx:
-                        print('Vote resolved at:', i, 'with outcome:', predictions[i], 'and votes:')
-                        for x in range(topx):
-                            print('Class:', neighbor_data[x,2], 'Dist:', neighbor_data[x,1])
-                    break
+            #     classes, counts = stats.mode(neighbor_data[:topx,2])
+            #     if counts[0] > (topx/3)+1:
+            #         predictions[i] = classes[0]
 
-                else:
-                    print('Disputed point with', topx, 'votes:', i)
-                    # print('Point:', X_test[i])
-                    for x in range(topx):
-                        print('Class:', neighbor_data[x,2], 'Dist:', neighbor_data[x,1])
-                        # print('Point:', self.X[neighbor_data[x,0]])
-                    topx+=2
+            #         if not counts[0] >= topx:
+            #             print('Vote resolved at:', i, 'with outcome:', predictions[i], 'and votes:')
+            #             for x in range(topx):
+            #                 print('Class:', neighbor_data[x,2], 'Dist:', neighbor_data[x,1])
+            #         break
+
+            #     else:
+            #         print('Disputed point with', topx, 'votes:', i)
+            #         # print('Point:', X_test[i])
+            #         for x in range(topx):
+            #             print('Class:', neighbor_data[x,2], 'Dist:', neighbor_data[x,1])
+            #             # print('Point:', self.X[neighbor_data[x,0]])
+            #         topx+=2
         print(np.bincount(predictions))
 
         return predictions
