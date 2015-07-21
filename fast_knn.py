@@ -93,18 +93,11 @@ class Predictor:
         print('Normalizing models...')
         self.observations = np.array(self.observations) / 4
         idx = 0
-        self.mean_min = 0
-        self.mean_max = 0
         for m in range(len(self.models)):
             model_min = np.amin(self.X[idx:idx+self.observations[m], 2:])
             model_max = np.amax(self.X[idx:idx+self.observations[m], 2:])
-            self.mean_min += model_min
-            self.mean_max += model_max
-            self.X[idx:idx+self.observations[m], :] =  (self.X[idx:idx+self.observations[m], :] - model_min) / (model_max - model_min)
+            self.X[idx:idx+self.observations[m], 2:] =  (self.X[idx:idx+self.observations[m], 2:] - model_min) / (model_max - model_min)
             idx += self.observations[m]
-        self.mean_min /= 3
-        self.mean_max /= 3
-
 
     def kmeans(self):
         """
@@ -115,7 +108,9 @@ class Predictor:
         X_test = pd.read_csv(self.test_data['path'], delimiter=',', header=0, dtype='float32').values[:,1:self.columns+1]
 
         print('Normalizing test data...')
-        X_test[:,2:] = (X_test[:,2:] - self.mean_min) / (self.mean_max - self.mean_min)
+        test_min = np.amin(X_test[:,2:])
+        test_max = np.amax(X_test[:,2:])
+        X_test[:,2:] = (X_test[:,2:] - test_min) / (test_max - test_min)
 
         predictions = np.empty([X_test.shape[0]], dtype = 'int32')
 
