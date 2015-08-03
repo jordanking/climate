@@ -5,6 +5,9 @@ A project to find a quick way to classify temperature time series readings as or
 Analyze the accuracy to which we can identify which climate model a time series of temperature readings comes from.
 This is a challenge used to research bias in climate models, done to assist Lawrence Livermore National Lab.
 
+# Data
+7 gb of climate time series readings from three different models hosted at LLNL.
+
 # Method
 Nearest neighbor methods tend to work well as models have strong biases, 
 though speed and preprocessing become big players when aiming for perfect classification. 
